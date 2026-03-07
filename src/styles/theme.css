@@ -1,0 +1,96 @@
+/* ─── Theme Variables ─────────────────────────────────────────────────────── */
+
+:root {
+  /* Light theme (default) */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-hover: #f0f2f5;
+  --bg-active: #e3e7eb;
+  --bg-overlay: rgba(0, 0, 0, 0.4);
+
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-tertiary: #8b949e;
+  --text-link: #0969da;
+  --text-link-hover: #0550ae;
+
+  --border-primary: #d0d7de;
+  --border-secondary: #e6e9ec;
+
+  --tab-bg: transparent;
+  --tab-bg-active: var(--bg-primary);
+  --tab-border-active: #0969da;
+
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-bg-active: var(--bg-active);
+
+  --search-highlight: rgba(255, 215, 0, 0.4);
+  --search-highlight-active: rgba(255, 140, 0, 0.6);
+
+  --frontmatter-bg: #f6f8fa;
+  --frontmatter-border: #d0d7de;
+  --tag-bg: #ddf4ff;
+  --tag-text: #0969da;
+
+  --code-bg: #f6f8fa;
+  --code-border: #e6e9ec;
+
+  --scrollbar-thumb: #c4c9ce;
+  --scrollbar-track: transparent;
+
+  --divider-color: #d0d7de;
+  --divider-hover: #0969da;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #1c2128;
+  --bg-active: #292e36;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-tertiary: #6e7681;
+  --text-link: #58a6ff;
+  --text-link-hover: #79c0ff;
+
+  --border-primary: #30363d;
+  --border-secondary: #21262d;
+
+  --tab-bg: transparent;
+  --tab-bg-active: var(--bg-primary);
+  --tab-border-active: #58a6ff;
+
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--bg-hover);
+  --btn-bg-active: var(--bg-active);
+
+  --search-highlight: rgba(210, 153, 34, 0.35);
+  --search-highlight-active: rgba(210, 153, 34, 0.65);
+
+  --frontmatter-bg: #161b22;
+  --frontmatter-border: #30363d;
+  --tag-bg: #1f3040;
+  --tag-text: #58a6ff;
+
+  --code-bg: #161b22;
+  --code-border: #30363d;
+
+  --scrollbar-thumb: #484f58;
+  --scrollbar-track: transparent;
+
+  --divider-color: #30363d;
+  --divider-hover: #58a6ff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
