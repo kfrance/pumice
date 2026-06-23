@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
@@ -164,12 +165,79 @@ export async function updateBacklinksForFile(filePath, backlinks, knownFiles) {
   }
 }
 
+const WATCHER_OPTIONS = {
+  persistent: true,
+  ignoreInitial: true,
+  awaitWriteFinish: {
+    stabilityThreshold: 100,
+    pollInterval: 50,
+  },
+};
+
+export function hashFileContent(content) {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+async function snapshotFile(filePath, stat) {
+  const content = await fs.readFile(filePath, 'utf-8');
+  return {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    hash: hashFileContent(content),
+  };
+}
+
+/**
+ * Build a map of absolute file paths to last-known file snapshots.
+ */
+export async function buildMtimeCache(files) {
+  const cache = new Map();
+  await Promise.all(files.map(async (filePath) => {
+    try {
+      const stat = await fs.stat(filePath);
+      cache.set(filePath, await snapshotFile(filePath, stat));
+    } catch {
+      // Skip unreadable files
+    }
+  }));
+  return cache;
+}
+
+/**
+ * Returns true when file metadata or content differs from the cached snapshot.
+ * When metadata is unchanged, compares a content hash to ignore spurious events.
+ */
+export async function hasFileChanged(filePath, mtimeCache) {
+  try {
+    const stat = await fs.stat(filePath);
+    const previous = mtimeCache.get(filePath);
+    const current = await snapshotFile(filePath, stat);
+
+    if (
+      previous?.mtimeMs === current.mtimeMs
+      && previous?.size === current.size
+      && previous?.hash === current.hash
+    ) {
+      return false;
+    }
+
+    mtimeCache.set(filePath, current);
+    return !previous
+      || previous.mtimeMs !== current.mtimeMs
+      || previous.size !== current.size
+      || previous.hash !== current.hash;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Create a file watcher for a directory tree.
  * Returns a chokidar watcher instance.
  */
 export function createWatcher(rootDir) {
   return chokidar.watch(rootDir, {
+    ...WATCHER_OPTIONS,
     ignored: (filePath, stats) => {
       const basename = path.basename(filePath);
       // Skip excluded directories
@@ -182,13 +250,15 @@ export function createWatcher(rootDir) {
       }
       return false;
     },
-    persistent: true,
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: 100,
-      pollInterval: 50,
-    },
   });
+}
+
+/**
+ * Create a file watcher for a single file.
+ * Returns a chokidar watcher instance.
+ */
+export function createFileWatcher(filePath) {
+  return chokidar.watch(filePath, WATCHER_OPTIONS);
 }
 
 export { shouldExcludeDir, EXCLUDED_DIRS };

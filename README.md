@@ -27,6 +27,7 @@ You can then run:
 
 ```bash
 pumice [path-to-folder-or-markdown-file]
+pumice --help
 ```
 
 Examples:
@@ -35,6 +36,10 @@ Examples:
 pumice ~/notes
 pumice ~/notes/README.md
 ```
+
+Opening the same path again focuses the existing window. Different paths
+open separate windows in one shared app process. The CLI exits immediately
+after launch — exit code 0 means the launcher ran, not that a window is visible.
 
 ## Development
 

@@ -226,4 +226,30 @@ describe('Sessions', () => {
     // Cleanup
     await configManager.removeSession(testSession.root);
   });
+
+  it('preserves concurrent saves for different roots', async () => {
+    const session1 = {
+      root: '/tmp/pumice-test-concurrent-1-' + Date.now(),
+      mode: 'folder',
+      panes: { left: { tabs: [], activeIndex: 0 } },
+    };
+    const session2 = {
+      root: '/tmp/pumice-test-concurrent-2-' + Date.now(),
+      mode: 'folder',
+      panes: { left: { tabs: [], activeIndex: 0 } },
+    };
+
+    await Promise.all([
+      configManager.saveSession(session1),
+      configManager.saveSession(session2),
+    ]);
+
+    const sessions = await configManager.loadSessions();
+    const roots = sessions.recent.map((s) => s.root);
+    expect(roots).toContain(session1.root);
+    expect(roots).toContain(session2.root);
+
+    await configManager.removeSession(session1.root);
+    await configManager.removeSession(session2.root);
+  });
 });

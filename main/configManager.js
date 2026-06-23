@@ -61,13 +61,23 @@ export async function updatePreference(key, value) {
 
 // ─── Sessions ───────────────────────────────────────────────────────────────
 
+let sessionsWriteChain = Promise.resolve();
+
+function enqueueSessionsWrite(task) {
+  const run = sessionsWriteChain.then(task);
+  sessionsWriteChain = run.catch(() => {});
+  return run;
+}
+
 export async function loadSessions() {
   const sessions = await readJsonFile(SESSIONS_PATH, DEFAULT_SESSIONS);
   return { ...DEFAULT_SESSIONS, ...sessions };
 }
 
 export async function saveSessions(sessions) {
-  await writeJsonFile(SESSIONS_PATH, sessions);
+  return enqueueSessionsWrite(async () => {
+    await writeJsonFile(SESSIONS_PATH, sessions);
+  });
 }
 
 /**
@@ -84,30 +94,29 @@ export async function findSession(rootPath) {
  * Moves it to the front of the recent list.
  */
 export async function saveSession(session) {
-  const sessions = await loadSessions();
+  return enqueueSessionsWrite(async () => {
+    const sessions = await loadSessions();
 
-  // Remove existing entry for this root
-  sessions.recent = sessions.recent.filter(s => s.root !== session.root);
+    sessions.recent = sessions.recent.filter(s => s.root !== session.root);
+    sessions.recent.unshift({
+      ...session,
+      lastOpened: new Date().toISOString(),
+    });
+    sessions.recent = sessions.recent.slice(0, sessions.maxRecent);
 
-  // Add to front
-  sessions.recent.unshift({
-    ...session,
-    lastOpened: new Date().toISOString(),
+    await writeJsonFile(SESSIONS_PATH, sessions);
   });
-
-  // Trim to maxRecent
-  sessions.recent = sessions.recent.slice(0, sessions.maxRecent);
-
-  await saveSessions(sessions);
 }
 
 /**
  * Remove a session for a given root path.
  */
 export async function removeSession(rootPath) {
-  const sessions = await loadSessions();
-  sessions.recent = sessions.recent.filter(s => s.root !== rootPath);
-  await saveSessions(sessions);
+  return enqueueSessionsWrite(async () => {
+    const sessions = await loadSessions();
+    sessions.recent = sessions.recent.filter(s => s.root !== rootPath);
+    await writeJsonFile(SESSIONS_PATH, sessions);
+  });
 }
 
 export {

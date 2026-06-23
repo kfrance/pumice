@@ -9,6 +9,8 @@ import {
   extractMarkdownLinks,
   buildBacklinksIndex,
   updateBacklinksForFile,
+  buildMtimeCache,
+  hasFileChanged,
   shouldExcludeDir,
 } from '../main/fileManager.js';
 
@@ -446,5 +448,69 @@ describe('Directory Exclusion Rules', () => {
     expect(shouldExcludeDir('docs')).toBe(false);
     expect(shouldExcludeDir('gospel')).toBe(false);
     expect(shouldExcludeDir('life')).toBe(false);
+  });
+});
+
+// ─── Mtime change detection ─────────────────────────────────────────────────
+
+describe('Mtime change detection', () => {
+  let tmpDir;
+
+  afterEach(async () => {
+    if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('builds a cache of mtimes for known files', async () => {
+    tmpDir = await createTempDir({ 'a.md': '# A', 'b.md': '# B' });
+    const files = [path.join(tmpDir, 'a.md'), path.join(tmpDir, 'b.md')];
+
+    const cache = await buildMtimeCache(files);
+
+    expect(cache.size).toBe(2);
+    expect(cache.has(path.join(tmpDir, 'a.md'))).toBe(true);
+    expect(cache.has(path.join(tmpDir, 'b.md'))).toBe(true);
+  });
+
+  it('returns false when mtime and size are unchanged', async () => {
+    tmpDir = await createTempDir({ 'a.md': '# A' });
+    const filePath = path.join(tmpDir, 'a.md');
+    const cache = await buildMtimeCache([filePath]);
+
+    expect(await hasFileChanged(filePath, cache)).toBe(false);
+    expect(await hasFileChanged(filePath, cache)).toBe(false);
+  });
+
+  it('returns true and updates cache when mtime changes', async () => {
+    tmpDir = await createTempDir({ 'a.md': '# A' });
+    const filePath = path.join(tmpDir, 'a.md');
+    const cache = await buildMtimeCache([filePath]);
+
+    await fs.writeFile(filePath, '# Updated', 'utf-8');
+
+    expect(await hasFileChanged(filePath, cache)).toBe(true);
+    expect(await hasFileChanged(filePath, cache)).toBe(false);
+  });
+
+  it('detects content changes when mtime and size stay the same', async () => {
+    tmpDir = await createTempDir({ 'a.md': '# A' });
+    const filePath = path.join(tmpDir, 'a.md');
+    const cache = await buildMtimeCache([filePath]);
+    const stat = await fs.stat(filePath);
+
+    await fs.writeFile(filePath, '# B', 'utf-8');
+    await fs.utimes(filePath, stat.atime, stat.mtime);
+
+    expect(await hasFileChanged(filePath, cache)).toBe(true);
+  });
+
+  it('suppresses spurious change events when mtime and size are unchanged', async () => {
+    tmpDir = await createTempDir({ 'note.md': '# Note', 'data.json': '{}' });
+    const mdPath = path.join(tmpDir, 'note.md');
+    const cache = await buildMtimeCache([mdPath]);
+
+    // Chokidar can emit change for note.md when data.json is edited; mtime stays put.
+    await fs.writeFile(path.join(tmpDir, 'data.json'), '{"changed": true}', 'utf-8');
+
+    expect(await hasFileChanged(mdPath, cache)).toBe(false);
   });
 });

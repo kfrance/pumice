@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { createWatcher } from '../main/fileManager.js';
+import { createWatcher, createFileWatcher } from '../main/fileManager.js';
 
 async function createTempDir(structure) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pumice-watcher-'));
@@ -82,39 +82,70 @@ describe('File Watcher', () => {
   });
 
   it('ignores changes to non-.md files', async () => {
-    tmpDir = await createTempDir({ 'test.md': '# Test', 'data.json': '{}' });
+    // No sibling .md files — directory writes can spuriously notify them on macOS.
+    tmpDir = await createTempDir({ 'data.json': '{}' });
     watcher = createWatcher(tmpDir);
 
     await new Promise((resolve) => watcher.on('ready', resolve));
 
-    let notifiedPath = null;
-    watcher.on('change', (p) => { notifiedPath = p; });
+    const changes = [];
+    watcher.on('change', (p) => changes.push(p));
 
-    // Modify the non-md file
     await fs.writeFile(path.join(tmpDir, 'data.json'), '{"changed": true}', 'utf-8');
 
-    // Wait a bit
     await new Promise(r => setTimeout(r, 300));
-    expect(notifiedPath).toBeNull();
+    expect(changes).toEqual([]);
+  });
+
+  it('detects when a single watched file is modified', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Original' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+
+    const changed = new Promise((resolve) => {
+      watcher.on('change', (changedPath) => resolve(changedPath));
+    });
+
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    await fs.writeFile(filePath, '# Modified', 'utf-8');
+
+    const changedPath = await changed;
+    expect(changedPath).toBe(filePath);
+  });
+
+  it('detects when a single watched file is deleted', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Delete me' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+
+    const removed = new Promise((resolve) => {
+      watcher.on('unlink', (removedPath) => resolve(removedPath));
+    });
+
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    await fs.unlink(filePath);
+
+    const removedPath = await removed;
+    expect(removedPath).toBe(filePath);
   });
 
   it('ignores files in dot directories', async () => {
+    // No sibling .md files at the root — same macOS spurious-change caveat as above.
     tmpDir = await createTempDir({
-      'visible.md': '# Visible',
       '.hidden': { 'secret.md': '# Secret' },
     });
     watcher = createWatcher(tmpDir);
 
     await new Promise((resolve) => watcher.on('ready', resolve));
 
-    let notifiedPath = null;
-    watcher.on('change', (p) => { notifiedPath = p; });
+    const changes = [];
+    watcher.on('change', (p) => changes.push(p));
 
-    // Modify file in hidden directory
     await fs.writeFile(path.join(tmpDir, '.hidden', 'secret.md'), '# Modified secret', 'utf-8');
 
-    // Wait a bit
     await new Promise(r => setTimeout(r, 300));
-    expect(notifiedPath).toBeNull();
+    expect(changes).toEqual([]);
   });
 });
