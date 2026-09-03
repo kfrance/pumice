@@ -207,6 +207,25 @@ describe('Inline Math (KaTeX)', () => {
     expect(html).not.toContain('$E');
   });
 
+  it('preserves currency amounts as text', () => {
+    const html = md.render('Gross pay was $110,368.54 and regular pay was $4,952.00.');
+    expect(html).toContain('$110,368.54');
+    expect(html).toContain('$4,952.00');
+    expect(html).not.toContain('katex');
+  });
+
+  it('preserves whole-dollar currency before inline math', () => {
+    const html = md.render('The fee is $5 and the equation $x + 1$ is useful.');
+    expect(html).toContain('$5');
+    expect(html).toContain('katex');
+  });
+
+  it('renders numeric inline math', () => {
+    const html = md.render('Expressions $2 + 2 = 4$, $3.5$, $2!$, and $2 x$ are numeric.');
+    expect(html).toContain('katex');
+    expect(html.match(/class="katex"/g)).toHaveLength(4);
+  });
+
   it('renders block math $$...$$', () => {
     const html = md.render('$$\nE = mc^2\n$$');
     expect(html).toContain('katex-display');

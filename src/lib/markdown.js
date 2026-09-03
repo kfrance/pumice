@@ -46,9 +46,16 @@ export function createMarkdownRenderer() {
     if (state.src[state.pos + 1] === '$') return false;
 
     const start = state.pos + 1;
+    if (/\s/.test(state.src[start] || '')) return false;
+
     let end = start;
     while (end < state.src.length) {
-      if (state.src[end] === '$' && state.src[end - 1] !== '\\') break;
+      if (state.src[end] === '$' && state.src[end - 1] !== '\\') {
+        // A dollar sign after whitespace or before a digit starts another
+        // currency amount; it cannot close the current math span.
+        if (/\s/.test(state.src[end - 1]) || /\d/.test(state.src[end + 1] || '')) return false;
+        break;
+      }
       end++;
     }
     if (end >= state.src.length) return false;
