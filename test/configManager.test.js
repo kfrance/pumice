@@ -9,26 +9,16 @@ let configManager;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pumice-config-test-'));
-
-  // Dynamically re-import with mocked paths
+  vi.stubEnv('XDG_CONFIG_HOME', tmpDir);
   vi.resetModules();
-
-  // Mock the module-level constants by using a wrapper approach
-  // Instead, we test via the file operations directly with a custom config dir
   configManager = await import('../main/configManager.js');
 });
 
 afterEach(async () => {
   if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
-
-// Since we can't easily mock the constants, let's test the behavior
-// via the actual config directory approach - or we test the logic more directly.
-// For true isolation, let's create a testable wrapper.
-
-// Actually, let's test the actual module functions and clean up after.
-// The tests will use the real ~/.config/pumice but we'll be careful.
 
 describe('Preferences', () => {
   it('returns default preferences when no config file exists', async () => {

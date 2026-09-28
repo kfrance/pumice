@@ -3,7 +3,7 @@ import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'pumice');
+const CONFIG_DIR = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'pumice');
 const PREFERENCES_PATH = path.join(CONFIG_DIR, 'preferences.json');
 const SESSIONS_PATH = path.join(CONFIG_DIR, 'sessions.json');
 

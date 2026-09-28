@@ -120,6 +120,7 @@ async function createWindow(targetPath) {
 
   if (watcher) {
     const fileUpdateChains = new Map();
+    const pendingRemovals = new Map();
 
     function enqueueFileUpdate(filePath, task) {
       const previous = fileUpdateChains.get(filePath) || Promise.resolve();
@@ -135,7 +136,13 @@ async function createWindow(targetPath) {
       return next;
     }
 
-    watcher.on('change', (filePath) => {
+    function cancelRemoval(filePath) {
+      const timer = pendingRemovals.get(filePath);
+      if (timer) clearTimeout(timer);
+      pendingRemovals.delete(filePath);
+    }
+
+    function notifyChanged(filePath) {
       enqueueFileUpdate(filePath, async () => {
         if (win.isDestroyed()) return;
         if (!await hasFileChanged(filePath, win.pumice.fileMtimes)) return;
@@ -143,9 +150,19 @@ async function createWindow(targetPath) {
         if (win.isDestroyed() || !win.pumice.knownFiles.has(filePath)) return;
         win.webContents.send('file:changed', filePath);
       });
+    }
+
+    watcher.on('change', (filePath) => {
+      cancelRemoval(filePath);
+      notifyChanged(filePath);
     });
 
     watcher.on('add', (filePath) => {
+      cancelRemoval(filePath);
+      if (win.pumice.knownFiles.has(filePath)) {
+        notifyChanged(filePath);
+        return;
+      }
       enqueueFileUpdate(filePath, async () => {
         if (win.isDestroyed()) return;
         win.pumice.files.push(filePath);
@@ -173,15 +190,35 @@ async function createWindow(targetPath) {
     });
 
     watcher.on('unlink', (filePath) => {
-      if (win.isDestroyed()) return;
-      win.pumice.files = win.pumice.files.filter(f => f !== filePath);
-      win.pumice.knownFiles.delete(filePath);
-      win.pumice.fileMtimes.delete(filePath);
-      win.pumice.backlinks.delete(filePath);
-      for (const [, sources] of win.pumice.backlinks) {
-        sources.delete(filePath);
-      }
-      win.webContents.send('file:removed', filePath);
+      cancelRemoval(filePath);
+      // An atomic save can surface as unlink followed by add. Keep its tab.
+      pendingRemovals.set(filePath, setTimeout(() => {
+        pendingRemovals.delete(filePath);
+        enqueueFileUpdate(filePath, async () => {
+          if (win.isDestroyed()) return;
+          if (await fs.stat(filePath).catch(() => null)) {
+            if (win.pumice.knownFiles.has(filePath)) {
+              if (await hasFileChanged(filePath, win.pumice.fileMtimes)) {
+                await updateBacklinksForFile(filePath, win.pumice.backlinks, win.pumice.knownFiles);
+                if (!win.isDestroyed()) win.webContents.send('file:changed', filePath);
+              }
+            }
+            return;
+          }
+          win.pumice.files = win.pumice.files.filter(f => f !== filePath);
+          win.pumice.knownFiles.delete(filePath);
+          win.pumice.fileMtimes.delete(filePath);
+          win.pumice.backlinks.delete(filePath);
+          for (const [, sources] of win.pumice.backlinks) {
+            sources.delete(filePath);
+          }
+          win.webContents.send('file:removed', filePath);
+        });
+      }, 500));
+    });
+
+    win.on('closed', () => {
+      for (const timer of pendingRemovals.values()) clearTimeout(timer);
     });
   }
 

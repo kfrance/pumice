@@ -258,7 +258,11 @@ export function createWatcher(rootDir) {
  * Returns a chokidar watcher instance.
  */
 export function createFileWatcher(filePath) {
-  return chokidar.watch(filePath, WATCHER_OPTIONS);
+  // Watch the directory so a replacement inode is discovered after an atomic save.
+  return chokidar.watch(path.dirname(filePath), {
+    ...WATCHER_OPTIONS,
+    ignored: (watchedPath, stats) => stats?.isFile() && watchedPath !== filePath,
+  });
 }
 
 export { shouldExcludeDir, EXCLUDED_DIRS };

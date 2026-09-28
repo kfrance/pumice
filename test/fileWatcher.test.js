@@ -114,6 +114,20 @@ describe('File Watcher', () => {
     expect(changedPath).toBe(filePath);
   });
 
+  it('does not report a sibling file in single-file mode', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Original', 'other.md': '# Other' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    const events = [];
+    watcher.on('all', (event, changedPath) => events.push({ event, changedPath }));
+    await fs.writeFile(path.join(tmpDir, 'other.md'), '# Updated');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(events).toEqual([]);
+  });
+
   it('detects when a single watched file is deleted', async () => {
     tmpDir = await createTempDir({ 'solo.md': '# Delete me' });
     const filePath = path.join(tmpDir, 'solo.md');
@@ -129,6 +143,71 @@ describe('File Watcher', () => {
 
     const removedPath = await removed;
     expect(removedPath).toBe(filePath);
+  });
+
+  it('continues watching a single file after an atomic replacement', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Original' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    const events = [];
+    watcher.on('all', (event, changedPath) => {
+      if (changedPath === filePath) events.push(event);
+    });
+
+    await fs.writeFile(path.join(tmpDir, '.solo.md.tmp'), '# Replacement');
+    await fs.rename(path.join(tmpDir, '.solo.md.tmp'), filePath);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await fs.writeFile(filePath, '# Next edit');
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    expect(events.filter((event) => event === 'change')).toHaveLength(2);
+  });
+
+  it('reports a burst of two replacements as the final file content', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Original' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    const events = [];
+    watcher.on('all', (event, changedPath) => {
+      if (changedPath === filePath) events.push(event);
+    });
+
+    await fs.writeFile(path.join(tmpDir, '.solo.md.tmp'), '# First edit');
+    await fs.rename(path.join(tmpDir, '.solo.md.tmp'), filePath);
+    await fs.writeFile(path.join(tmpDir, '.solo.md.tmp'), '# Second edit');
+    await fs.rename(path.join(tmpDir, '.solo.md.tmp'), filePath);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    expect(events).toContain('change');
+    expect(await fs.readFile(filePath, 'utf8')).toBe('# Second edit');
+  });
+
+  it('watches the recreated file after a delayed replacement', async () => {
+    tmpDir = await createTempDir({ 'solo.md': '# Original' });
+    const filePath = path.join(tmpDir, 'solo.md');
+    watcher = createFileWatcher(filePath);
+    await new Promise((resolve) => watcher.on('ready', resolve));
+
+    const events = [];
+    watcher.on('all', (event, changedPath) => {
+      if (changedPath === filePath) events.push(event);
+    });
+
+    await fs.unlink(filePath);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await fs.writeFile(filePath, '# Recreated');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await fs.writeFile(filePath, '# Updated again');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(events).toContain('unlink');
+    expect(events).toContain('add');
+    expect(events).toContain('change');
+    expect(await fs.readFile(filePath, 'utf8')).toBe('# Updated again');
   });
 
   it('ignores files in dot directories', async () => {

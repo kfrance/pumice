@@ -18,6 +18,8 @@ let currentTheme = 'light';
 let activePaneId = 'left';
 let autoSaveTimers = {};
 let splitActive = false;
+const editorLoads = { left: false, right: false };
+const visibleFileChecks = { left: false, right: false };
 
 // ─── Navigation History (per pane) ──────────────────────────────────────────
 
@@ -126,7 +128,7 @@ async function getOrCreateEditor(paneId) {
         cmMarkdown(),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          if (update.docChanged && !editorLoads[paneId]) {
             handleEditorChange(paneId);
           }
         }),
@@ -241,15 +243,15 @@ async function renderActiveTab(paneId = 'left') {
   updateNavButtons();
 }
 
-async function showRendered(paneId, tab) {
+async function showRendered(paneId, tab, loadedContent) {
   const markdownView = elements.markdownViews[paneId];
   const editorContainer = elements.editorContainers[paneId];
 
-  markdownView.classList.remove('hidden');
-  editorContainer.classList.add('hidden');
-
   try {
-    const { content } = await pumice.files.read(tab.path);
+    const content = loadedContent ?? (await pumice.files.read(tab.path)).content;
+    if (tabManager.getActive(paneId) !== tab || tab.mode !== 'read') return;
+    markdownView.classList.remove('hidden');
+    editorContainer.classList.add('hidden');
 
     const fileDir = tab.path.substring(0, tab.path.lastIndexOf('/'));
     let html = renderMarkdown(content, md, tab.path);
@@ -260,6 +262,7 @@ async function showRendered(paneId, tab) {
     );
 
     markdownView.innerHTML = html;
+    tab.diskContent = content;
 
     const paneContent = markdownView.closest('.pane-content');
     if (paneContent && tab.scrollTop) {
@@ -285,15 +288,94 @@ async function showEditor(paneId, tab) {
   const markdownView = elements.markdownViews[paneId];
   const editorContainer = elements.editorContainers[paneId];
 
+  const editor = await getOrCreateEditor(paneId);
+  const { content } = await pumice.files.read(tab.path);
+  if (tabManager.getActive(paneId) !== tab || tab.mode !== 'edit') return;
   markdownView.classList.add('hidden');
   editorContainer.classList.remove('hidden');
 
-  const editor = await getOrCreateEditor(paneId);
-  const { content } = await pumice.files.read(tab.path);
+  editorLoads[paneId] = true;
+  try {
+    editor.dispatch({
+      changes: { from: 0, to: editor.state.doc.length, insert: content },
+    });
+  } finally {
+    editorLoads[paneId] = false;
+  }
+  tab.diskContent = content;
+  tab.externalConflict = false;
+  updateConflictNotice(paneId, tab);
+}
 
-  editor.dispatch({
-    changes: { from: 0, to: editor.state.doc.length, insert: content },
+function updateConflictNotice(paneId, tab) {
+  const container = elements.editorContainers[paneId];
+  let notice = container.querySelector('.external-change-notice');
+  if (notice?.dataset.path !== tab.path) {
+    notice?.remove();
+    notice = null;
+  }
+  if (!tab.externalConflict) {
+    notice?.remove();
+    return;
+  }
+  if (notice) return;
+  notice = document.createElement('div');
+  notice.className = 'external-change-notice';
+  notice.dataset.path = tab.path;
+  notice.textContent = 'This file changed on disk. Your unsaved edits are preserved. ';
+  const reload = document.createElement('button');
+  reload.textContent = 'Load disk version';
+  reload.addEventListener('click', () => {
+    if (tabManager.getActive(paneId) === tab && tab.mode === 'edit') {
+      void showEditor(paneId, tab);
+    }
   });
+  notice.appendChild(reload);
+  container.prepend(notice);
+}
+
+async function checkVisibleFile(paneId) {
+  if (visibleFileChecks[paneId]) return;
+  const tab = tabManager.getActive(paneId);
+  if (!tab || tab.diskContent === undefined || (paneId === 'right' && !tabManager.isSplit())) return;
+  visibleFileChecks[paneId] = true;
+  try {
+    const { content } = await pumice.files.read(tab.path);
+    if (tabManager.getActive(paneId) !== tab || content === tab.diskContent) return;
+
+    if (tab.mode === 'read') {
+      const paneContent = elements.panes[paneId]?.querySelector('.pane-content');
+      const scrollTop = paneContent?.scrollTop || 0;
+      await showRendered(paneId, tab, content);
+      if (paneContent) requestAnimationFrame(() => { paneContent.scrollTop = scrollTop; });
+      await updateBacklinks(paneId, tab.path);
+      return;
+    }
+
+    const editor = editors[paneId];
+    if (!editor) return;
+    const editorContent = editor.state.doc.toString();
+    if (content === editorContent && !tab.externalConflict) {
+      tab.diskContent = content;
+    } else if (editorContent === tab.diskContent && !tab.externalConflict) {
+      editorLoads[paneId] = true;
+      try {
+        editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } });
+      } finally {
+        editorLoads[paneId] = false;
+      }
+      tab.diskContent = content;
+    } else {
+      clearTimeout(autoSaveTimers[paneId]);
+      tab.externalConflict = true;
+      updateConflictNotice(paneId, tab);
+    }
+  } catch (err) {
+    // A rename or replacement can briefly make the path unavailable.
+    if (err?.code !== 'ENOENT') console.error('[pumice] File check failed:', err);
+  } finally {
+    visibleFileChecks[paneId] = false;
+  }
 }
 
 function handleEditorChange(paneId) {
@@ -306,10 +388,21 @@ function handleEditorChange(paneId) {
 
   autoSaveTimers[paneId] = setTimeout(async () => {
     const editor = editors[paneId];
-    if (!editor) return;
+    if (!editor || tabManager.getActive(paneId) !== tab || tab.externalConflict) return;
 
     const content = editor.state.doc.toString();
-    await pumice.files.write(tab.path, content);
+    try {
+      const diskContent = (await pumice.files.read(tab.path)).content;
+      if (diskContent !== tab.diskContent) {
+        tab.externalConflict = true;
+        updateConflictNotice(paneId, tab);
+        return;
+      }
+      await pumice.files.write(tab.path, content);
+      tab.diskContent = content;
+    } catch (err) {
+      console.error('[pumice] Auto-save failed:', err);
+    }
   }, 300);
 }
 
@@ -933,18 +1026,7 @@ document.addEventListener('keydown', (e) => {
 pumice.files.onChanged(async (filePath) => {
   for (const paneId of ['left', 'right']) {
     const tab = tabManager.getActive(paneId);
-    if (tab && tab.path === filePath && tab.mode === 'read') {
-      const paneContent = elements.panes[paneId]?.querySelector('.pane-content');
-      const scrollTop = paneContent?.scrollTop || 0;
-
-      await showRendered(paneId, tab);
-
-      if (paneContent) {
-        requestAnimationFrame(() => {
-          paneContent.scrollTop = scrollTop;
-        });
-      }
-    }
+    if (tab?.path === filePath) await checkVisibleFile(paneId);
   }
 });
 
@@ -1034,6 +1116,12 @@ function escapeHtml(str) {
 
 // ─── Start ──────────────────────────────────────────────────────────────────
 
-init().catch(err => {
+init().then(() => {
+  // Reconcile visible tabs even when an OS watcher event is lost or coalesced.
+  setInterval(() => {
+    void checkVisibleFile('left');
+    if (tabManager.isSplit()) void checkVisibleFile('right');
+  }, 1000);
+}).catch(err => {
   console.error('[pumice] Initialization failed:', err);
 });
