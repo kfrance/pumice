@@ -1,4 +1,5 @@
 import { createMarkdownRenderer, renderMarkdown } from './lib/markdown.js';
+import { mountMermaidBlocks } from './lib/mermaid.js';
 import { TabManager } from './lib/tabs.js';
 import { FuzzySearch } from './lib/fuzzySearch.js';
 import { DocumentSearch } from './lib/documentSearch.js';
@@ -571,25 +572,19 @@ document.addEventListener('contextmenu', (e) => {
 
 // ─── Mermaid Init ───────────────────────────────────────────────────────────
 
-let mermaidLoaded = false;
+let mermaidApi = null;
 async function initMermaid(container) {
-  const mermaidDivs = container.querySelectorAll('.mermaid');
-  if (mermaidDivs.length === 0) return;
-
-  if (!mermaidLoaded) {
-    const mermaid = await import('mermaid');
-    mermaid.default.initialize({
-      startOnLoad: false,
-      theme: currentTheme === 'dark' ? 'dark' : 'default',
-    });
-    window.mermaid = mermaid.default;
-    mermaidLoaded = true;
-  }
+  if (container.querySelectorAll('.mermaid:not(.mermaid-diagram)').length === 0) return;
 
   try {
-    await window.mermaid.run({ nodes: mermaidDivs });
+    if (!mermaidApi) mermaidApi = (await import('mermaid')).default;
+    await mountMermaidBlocks(
+      container,
+      mermaidApi,
+      currentTheme === 'dark' ? 'dark' : 'default',
+    );
   } catch {
-    // Mermaid rendering errors are non-fatal
+    // Mermaid rendering errors are non-fatal; the diagram source stays visible.
   }
 }
 
