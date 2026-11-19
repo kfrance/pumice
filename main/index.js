@@ -20,7 +20,7 @@ import {
   updateBacklinksForFile,
 } from './fileManager.js';
 import { loadPreferences, findSession } from './configManager.js';
-import { createWindowRegistry } from './windowRegistry.js';
+import { createWindowRegistry, presentOnCurrentWorkspace } from './windowRegistry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,6 +86,7 @@ async function createWindow(targetPath) {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -93,6 +94,7 @@ async function createWindow(targetPath) {
     },
     title: 'Pumice',
   });
+  presentOnCurrentWorkspace(win);
 
   let session = null;
   if (rootDir) {

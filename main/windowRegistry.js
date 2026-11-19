@@ -1,4 +1,22 @@
 /**
+ * Show a window on the workspace the user is using.
+ *
+ * A long-lived process otherwise keeps new and focused windows on the
+ * workspace where its first window was placed. On Linux, pinning to every
+ * workspace for the show/focus call makes the compositor retarget the
+ * window, then the pin is removed so it stays on that one workspace.
+ */
+export function presentOnCurrentWorkspace(win, platform = process.platform) {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  const retarget = platform === 'linux' && typeof win.setVisibleOnAllWorkspaces === 'function';
+  if (retarget) win.setVisibleOnAllWorkspaces(true);
+  win.show();
+  win.focus();
+  if (retarget) win.setVisibleOnAllWorkspaces(false);
+}
+
+/**
  * Tracks open windows and coalesces concurrent open requests for the same key.
  */
 export function createWindowRegistry() {
@@ -8,9 +26,7 @@ export function createWindowRegistry() {
   const pendingOpens = new Map();
 
   function focusWindow(win) {
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    presentOnCurrentWorkspace(win);
   }
 
   function trackWindow(key, win) {

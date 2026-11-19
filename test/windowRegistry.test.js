@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createWindowRegistry } from '../main/windowRegistry.js';
+import { createWindowRegistry, presentOnCurrentWorkspace } from '../main/windowRegistry.js';
 
 function mockWindow(id) {
   let destroyed = false;
@@ -10,6 +10,7 @@ function mockWindow(id) {
     restore: vi.fn(),
     show: vi.fn(),
     focus: vi.fn(),
+    setVisibleOnAllWorkspaces: vi.fn(),
     on: vi.fn((event, cb) => {
       if (event === 'closed') mockWindow._close = cb;
     }),
@@ -48,6 +49,29 @@ describe('window registry', () => {
 
     expect(openFn).not.toHaveBeenCalled();
     expect(result).toBe(win);
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it('brings a window onto the current workspace on Linux', () => {
+    const win = mockWindow(1);
+    win.isMinimized = () => true;
+
+    presentOnCurrentWorkspace(win, 'linux');
+
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.setVisibleOnAllWorkspaces.mock.calls).toEqual([[true], [false]]);
+    const showOrder = win.show.mock.invocationCallOrder[0];
+    const pinOrder = win.setVisibleOnAllWorkspaces.mock.invocationCallOrder[0];
+    const unpinOrder = win.setVisibleOnAllWorkspaces.mock.invocationCallOrder[1];
+    expect(pinOrder).toBeLessThan(showOrder);
+    expect(showOrder).toBeLessThan(unpinOrder);
+  });
+
+  it('leaves workspace placement alone outside Linux', () => {
+    const win = mockWindow(1);
+    presentOnCurrentWorkspace(win, 'darwin');
+    expect(win.setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
+    expect(win.show).toHaveBeenCalled();
     expect(win.focus).toHaveBeenCalled();
   });
 
