@@ -16,6 +16,7 @@ import {
   hasFileChanged,
   createWatcher,
   createFileWatcher,
+  attachWatcherErrorHandler,
   hashFileContent,
   updateBacklinksForFile,
 } from './fileManager.js';
@@ -66,14 +67,14 @@ async function createWindow(targetPath) {
       console.log(`[pumice] Discovered ${files.length} files in ${discovery.elapsed.toFixed(1)}ms`);
 
       backlinksData = await buildBacklinksIndex(files, rootDir);
-      watcher = createWatcher(rootDir);
+      watcher = attachWatcherErrorHandler(createWatcher(rootDir));
     } else if (stat.isFile()) {
       mode = 'file';
       rootDir = null;
       initialFile = resolvedPath;
       files = [resolvedPath];
       backlinksData = { backlinks: new Map(), elapsed: 0 };
-      watcher = createFileWatcher(resolvedPath);
+      watcher = attachWatcherErrorHandler(createFileWatcher(resolvedPath));
     }
   } else {
     mode = 'empty';

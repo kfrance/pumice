@@ -1,8 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'events';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { createWatcher, createFileWatcher } from '../main/fileManager.js';
+import {
+  createWatcher,
+  createFileWatcher,
+  attachWatcherErrorHandler,
+} from '../main/fileManager.js';
 
 async function createTempDir(structure) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pumice-watcher-'));
@@ -226,5 +231,111 @@ describe('File Watcher', () => {
 
     await new Promise(r => setTimeout(r, 300));
     expect(changes).toEqual([]);
+  });
+
+  it('does not watch sibling subdirectories or symlinked trees in single-file mode', async () => {
+    tmpDir = await createTempDir({
+      'solo.md': '# Solo',
+      'sibling-dir': { 'nested.md': '# Nested' },
+    });
+    const externalDir = await createTempDir({
+      'external.md': '# External',
+      'deep': { 'leaf.md': '# Leaf' },
+    });
+    try {
+      const symlinkPath = path.join(tmpDir, 'linked-home');
+      await fs.symlink(externalDir, symlinkPath);
+
+      const filePath = path.join(tmpDir, 'solo.md');
+      watcher = createFileWatcher(filePath);
+      await new Promise((resolve) => watcher.on('ready', resolve));
+
+      const watched = watcher.getWatched();
+      const watchedDirs = Object.keys(watched);
+      expect(watchedDirs).not.toContain(path.join(tmpDir, 'sibling-dir'));
+      expect(watchedDirs).not.toContain(symlinkPath);
+      expect(watchedDirs).not.toContain(externalDir);
+      expect(watchedDirs).not.toContain(path.join(externalDir, 'deep'));
+      expect(watched[tmpDir]).toEqual(['solo.md']);
+
+      const events = [];
+      watcher.on('all', (event, changedPath) => events.push({ event, changedPath }));
+
+      await fs.writeFile(path.join(tmpDir, 'sibling-dir', 'nested.md'), '# Changed nested');
+      await fs.writeFile(path.join(externalDir, 'deep', 'leaf.md'), '# Changed external');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(events).toEqual([]);
+    } finally {
+      await fs.rm(externalDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not follow symlinked directories in folder mode', async () => {
+    tmpDir = await createTempDir({
+      'note.md': '# Note',
+    });
+    const externalDir = await createTempDir({
+      'outside.md': '# Outside',
+    });
+    try {
+      const symlinkPath = path.join(tmpDir, 'linked-outside');
+      await fs.symlink(externalDir, symlinkPath);
+
+      watcher = createWatcher(tmpDir);
+      await new Promise((resolve) => watcher.on('ready', resolve));
+
+      const watchedDirs = Object.keys(watcher.getWatched());
+      expect(watchedDirs).not.toContain(symlinkPath);
+      expect(watchedDirs).not.toContain(externalDir);
+
+      const events = [];
+      watcher.on('all', (event, changedPath) => events.push({ event, changedPath }));
+
+      await fs.writeFile(path.join(externalDir, 'outside.md'), '# Changed outside');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(events).toEqual([]);
+    } finally {
+      await fs.rm(externalDir, { recursive: true, force: true });
+    }
+  });
+
+  it('watches files when the root folder itself is a dot directory', async () => {
+    tmpDir = await createTempDir({
+      '.plan': { 'roadmap.md': '# Roadmap' },
+    });
+    const dotRoot = path.join(tmpDir, '.plan');
+    watcher = createWatcher(dotRoot);
+
+    const changed = new Promise((resolve) => {
+      watcher.on('change', (filePath) => resolve(filePath));
+    });
+
+    await new Promise((resolve) => watcher.on('ready', resolve));
+    await fs.writeFile(path.join(dotRoot, 'roadmap.md'), '# Updated roadmap', 'utf-8');
+
+    expect(await changed).toBe(path.join(dotRoot, 'roadmap.md'));
+  });
+
+  it('handles watcher errors cleanly and closes on ENOSPC without flooding', () => {
+    const fakeWatcher = new EventEmitter();
+    fakeWatcher.close = vi.fn(() => Promise.resolve());
+    const logger = { error: vi.fn() };
+
+    attachWatcherErrorHandler(fakeWatcher, logger);
+
+    const minorError = Object.assign(new Error('transient'), { code: 'EIO' });
+    fakeWatcher.emit('error', minorError);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(fakeWatcher.close).not.toHaveBeenCalled();
+
+    const enospc1 = Object.assign(new Error('System limit reached'), { code: 'ENOSPC' });
+    const enospc2 = Object.assign(new Error('System limit reached again'), { code: 'ENOSPC' });
+    fakeWatcher.emit('error', enospc1);
+    fakeWatcher.emit('error', enospc2);
+
+    expect(logger.error).toHaveBeenCalledTimes(2);
+    expect(fakeWatcher.close).toHaveBeenCalledTimes(1);
   });
 });

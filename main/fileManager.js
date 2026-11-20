@@ -168,6 +168,7 @@ export async function updateBacklinksForFile(filePath, backlinks, knownFiles) {
 const WATCHER_OPTIONS = {
   persistent: true,
   ignoreInitial: true,
+  ignorePermissionErrors: true,
   awaitWriteFinish: {
     stabilityThreshold: 100,
     pollInterval: 50,
@@ -236,19 +237,28 @@ export async function hasFileChanged(filePath, mtimeCache) {
  * Returns a chokidar watcher instance.
  */
 export function createWatcher(rootDir) {
-  return chokidar.watch(rootDir, {
+  const resolvedRoot = path.resolve(rootDir);
+  return chokidar.watch(resolvedRoot, {
     ...WATCHER_OPTIONS,
-    ignored: (filePath, stats) => {
-      const basename = path.basename(filePath);
+    ignored: (watchedPath, stats) => {
+      const resolvedWatched = path.resolve(watchedPath);
+      if (resolvedWatched === resolvedRoot) {
+        return false;
+      }
+      if (!stats) {
+        return false;
+      }
+      const basename = path.basename(resolvedWatched);
       // Skip excluded directories
-      if (stats?.isDirectory()) {
+      if (stats.isDirectory()) {
         return shouldExcludeDir(basename);
       }
       // Only watch .md files
-      if (stats?.isFile()) {
+      if (stats.isFile()) {
         return !basename.endsWith('.md');
       }
-      return false;
+      // Ignore symlinks, sockets, FIFOs, etc. (matches discoverFiles)
+      return true;
     },
   });
 }
@@ -258,11 +268,41 @@ export function createWatcher(rootDir) {
  * Returns a chokidar watcher instance.
  */
 export function createFileWatcher(filePath) {
-  // Watch the directory so a replacement inode is discovered after an atomic save.
-  return chokidar.watch(path.dirname(filePath), {
+  const resolvedFile = path.resolve(filePath);
+  const parentDir = path.dirname(resolvedFile);
+
+  // Watch only the parent directory (non-recursively) so a replacement inode
+  // is discovered after an atomic save without descending into sibling trees.
+  return chokidar.watch(parentDir, {
     ...WATCHER_OPTIONS,
-    ignored: (watchedPath, stats) => stats?.isFile() && watchedPath !== filePath,
+    depth: 0,
+    ignored: (watchedPath) => {
+      const resolvedWatched = path.resolve(watchedPath);
+      return resolvedWatched !== parentDir && resolvedWatched !== resolvedFile;
+    },
   });
+}
+
+/**
+ * Attach an error handler so watcher errors never become unhandled rejections.
+ * Closes the watcher on resource exhaustion (ENOSPC/EMFILE) to avoid error floods.
+ */
+export function attachWatcherErrorHandler(watcher, logger = console) {
+  let stopped = false;
+  watcher.on('error', (error) => {
+    if (stopped) return;
+    const code = error?.code;
+    if (code === 'ENOSPC' || code === 'EMFILE') {
+      stopped = true;
+      logger.error(
+        `[pumice] File watcher stopped (${code}): ${error.message}. Live reload disabled for this window.`,
+      );
+      void watcher.close();
+      return;
+    }
+    logger.error('[pumice] File watcher error:', error?.message || error);
+  });
+  return watcher;
 }
 
 export { shouldExcludeDir, EXCLUDED_DIRS };
